@@ -1,15 +1,3 @@
-"""
-Mars Solar Panel Output Prediction System
-==========================================
-This script predicts daily solar panel output for a Martian colony during dust storms
-using machine learning regression models.
-
-Scientific Context:
-- Mars receives ~43% of Earth's solar irradiance at perihelion
-- Dust storms can reduce solar irradiance by 99% during global events
-- Solar panel efficiency degrades due to dust accumulation and temperature variations
-"""
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -22,55 +10,19 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-# Set random seed for reproducibility
 np.random.seed(42)
 
-# ============================================================================
-# STEP 1: GENERATE SYNTHETIC MARTIAN SOLAR DATA
-# ============================================================================
-# In a real scenario, this would be replaced with actual Mars rover/station data
-
 def generate_mars_solar_data(n_samples=1000):
-    """
-    Generate synthetic Mars solar panel data with realistic physical constraints.
-    
-    Parameters:
-    -----------
-    n_samples : int
-        Number of daily observations to generate
-        
-    Returns:
-    --------
-    pd.DataFrame : Dataset with features and target variable
-    """
     print("Generating synthetic Martian solar data...")
     
-    # Feature 1: Solar irradiance (W/m²)
-    # Mars average: 590 W/m² (clear day), can drop to <10 W/m² during dust storms
     base_irradiance = np.random.normal(550, 100, n_samples)
-    
-    # Feature 2: Dust storm probability (0-1 scale)
-    # Higher values indicate higher likelihood/intensity of dust storms
-    dust_probability = np.random.beta(2, 5, n_samples)  # Skewed toward lower values
-    
-    # Feature 3: Panel efficiency (%)
-    # Typical range: 15-25% for space-grade solar panels, reduced by dust
+    dust_probability = np.random.beta(2, 5, n_samples)
     base_efficiency = np.random.normal(20, 2, n_samples)
-    
-    # Feature 4: Martian sol (day number in mission)
-    # Panel efficiency degrades over time due to dust accumulation
     sol_number = np.arange(n_samples)
-    
-    # Feature 5: Panel temperature (°C)
-    # Mars surface temperature: -60°C average, affects efficiency
     panel_temp = np.random.normal(-45, 15, n_samples)
-    
-    # Feature 6: Atmospheric opacity (tau)
-    # Measure of dust in atmosphere; normal ~0.5, storm >2.0
     atmospheric_opacity = 0.3 + dust_probability * 3.0 + np.random.normal(0, 0.2, n_samples)
     atmospheric_opacity = np.clip(atmospheric_opacity, 0.1, 5.0)
     
-    # Create DataFrame
     data = pd.DataFrame({
         'solar_irradiance': base_irradiance,
         'dust_storm_probability': dust_probability,
@@ -80,39 +32,25 @@ def generate_mars_solar_data(n_samples=1000):
         'atmospheric_opacity': atmospheric_opacity
     })
     
-    # ========================================================================
-    # CALCULATE TARGET: Daily Energy Output (kWh)
-    # ========================================================================
-    # Physics-based calculation with dust storm effects
-    
-    # Reduce irradiance based on atmospheric opacity
     effective_irradiance = data['solar_irradiance'] * np.exp(-atmospheric_opacity)
     
-    # Panel efficiency decreases with dust storms and temperature
     dust_efficiency_factor = 1 - (data['dust_storm_probability'] * 0.6)
     temp_efficiency_factor = 1 - ((data['panel_temperature'] + 45) * 0.002)
-    degradation_factor = 1 - (data['sol_number'] / n_samples * 0.15)  # 15% degradation over mission
+    degradation_factor = 1 - (data['sol_number'] / n_samples * 0.15)
     
     effective_efficiency = (data['base_panel_efficiency'] * 
                            dust_efficiency_factor * 
                            temp_efficiency_factor * 
                            degradation_factor)
     
-    # Panel array size: 100 m² (typical for small Mars colony)
-    panel_area = 100  # square meters
-    
-    # Mars sol is ~24.6 hours; assume ~12 hours of usable sunlight
+    panel_area = 100
     sunlight_hours = 12
     
-    # Calculate daily energy output in kWh
-    # Energy (kWh) = Power (kW) × Time (hours)
-    # Power = Irradiance (W/m²) × Area (m²) × Efficiency (decimal)
     daily_output = (effective_irradiance * panel_area * 
                    (effective_efficiency / 100) * sunlight_hours) / 1000
     
-    # Add realistic noise (measurement errors, weather variations)
     daily_output += np.random.normal(0, 5, n_samples)
-    daily_output = np.clip(daily_output, 0, None)  # Energy cannot be negative
+    daily_output = np.clip(daily_output, 0, None)
     
     data['daily_energy_output_kwh'] = daily_output
     
@@ -122,42 +60,22 @@ def generate_mars_solar_data(n_samples=1000):
     return data
 
 
-# ============================================================================
-# STEP 2: DATA PREPROCESSING AND EXPLORATION
-# ============================================================================
-
 def preprocess_data(data):
-    """
-    Perform data cleaning and exploratory analysis.
-    
-    Parameters:
-    -----------
-    data : pd.DataFrame
-        Raw dataset
-        
-    Returns:
-    --------
-    pd.DataFrame : Cleaned dataset
-    """
     print("\n" + "="*70)
     print("DATA PREPROCESSING")
     print("="*70)
     
-    # Check for missing values
     missing = data.isnull().sum()
     print(f"\nMissing values:\n{missing}")
     
-    # Remove any duplicate rows
     initial_rows = len(data)
     data = data.drop_duplicates()
     print(f"Removed {initial_rows - len(data)} duplicate rows")
     
-    # Statistical summary
     print(f"\nDataset shape: {data.shape}")
     print(f"\nStatistical Summary:")
     print(data.describe())
     
-    # Check for outliers using IQR method
     Q1 = data.quantile(0.25)
     Q3 = data.quantile(0.75)
     IQR = Q3 - Q1
@@ -167,39 +85,20 @@ def preprocess_data(data):
     return data
 
 
-# ============================================================================
-# STEP 3: FEATURE ENGINEERING
-# ============================================================================
-
 def engineer_features(data):
-    """
-    Create additional features to improve model performance.
-    
-    Parameters:
-    -----------
-    data : pd.DataFrame
-        Preprocessed dataset
-        
-    Returns:
-    --------
-    pd.DataFrame : Dataset with engineered features
-    """
     print("\n" + "="*70)
     print("FEATURE ENGINEERING")
     print("="*70)
     
-    # Interaction features
     data['irradiance_x_efficiency'] = (data['solar_irradiance'] * 
                                        data['base_panel_efficiency'])
     
     data['dust_opacity_interaction'] = (data['dust_storm_probability'] * 
                                        data['atmospheric_opacity'])
     
-    # Polynomial features for non-linear relationships
     data['opacity_squared'] = data['atmospheric_opacity'] ** 2
     data['temp_squared'] = data['panel_temperature'] ** 2
     
-    # Seasonal patterns (Mars year ≈ 687 Earth days)
     data['seasonal_component'] = np.sin(2 * np.pi * data['sol_number'] / 687)
     
     print(f"✓ Created {5} new engineered features")
@@ -208,36 +107,16 @@ def engineer_features(data):
     return data
 
 
-# ============================================================================
-# STEP 4: TRAIN-TEST SPLIT AND FEATURE SCALING
-# ============================================================================
-
 def prepare_train_test_data(data, test_size=0.2):
-    """
-    Split data into training and testing sets, then scale features.
-    
-    Parameters:
-    -----------
-    data : pd.DataFrame
-        Dataset with all features
-    test_size : float
-        Proportion of data to use for testing
-        
-    Returns:
-    --------
-    tuple : X_train, X_test, y_train, y_test, scaler, feature_names
-    """
     print("\n" + "="*70)
     print("DATA SPLITTING AND SCALING")
     print("="*70)
     
-    # Separate features (X) and target (y)
     X = data.drop('daily_energy_output_kwh', axis=1)
     y = data['daily_energy_output_kwh']
     
     feature_names = X.columns.tolist()
     
-    # Split data: 80% training, 20% testing
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=42, shuffle=True
     )
@@ -245,9 +124,6 @@ def prepare_train_test_data(data, test_size=0.2):
     print(f"Training set size: {len(X_train)} samples ({(1-test_size)*100:.0f}%)")
     print(f"Testing set size: {len(X_test)} samples ({test_size*100:.0f}%)")
     
-    # Feature scaling using StandardScaler
-    # This normalizes features to have mean=0 and std=1
-    # Critical for distance-based algorithms, beneficial for tree-based models
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
@@ -259,44 +135,19 @@ def prepare_train_test_data(data, test_size=0.2):
     return X_train_scaled, X_test_scaled, y_train, y_test, scaler, feature_names
 
 
-# ============================================================================
-# STEP 5: MODEL TRAINING
-# ============================================================================
-
 def train_random_forest_model(X_train, y_train):
-    """
-    Train a Random Forest Regressor optimized for Mars solar prediction.
-    
-    Random Forest advantages:
-    - Handles non-linear relationships well
-    - Robust to outliers
-    - Provides feature importance
-    - Minimal hyperparameter tuning needed
-    
-    Parameters:
-    -----------
-    X_train : np.ndarray
-        Scaled training features
-    y_train : pd.Series
-        Training target values
-        
-    Returns:
-    --------
-    RandomForestRegressor : Trained model
-    """
     print("\n" + "="*70)
     print("MODEL TRAINING: Random Forest Regressor")
     print("="*70)
     
-    # Initialize Random Forest with optimized hyperparameters
     model = RandomForestRegressor(
-        n_estimators=200,        # Number of trees in the forest
-        max_depth=20,            # Maximum depth of trees (prevents overfitting)
-        min_samples_split=5,     # Minimum samples required to split a node
-        min_samples_leaf=2,      # Minimum samples required at leaf node
-        max_features='sqrt',     # Number of features to consider for best split
-        random_state=42,         # Reproducibility
-        n_jobs=-1,               # Use all CPU cores
+        n_estimators=200,
+        max_depth=20,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        max_features='sqrt',
+        random_state=42,
+        n_jobs=-1,
         verbose=0
     )
     
@@ -305,12 +156,10 @@ def train_random_forest_model(X_train, y_train):
     print(f"  - Max depth: {model.max_depth}")
     print(f"  - Min samples split: {model.min_samples_split}")
     
-    # Train the model
     print("\nTraining model...")
     model.fit(X_train, y_train)
     print("✓ Training complete")
     
-    # Perform cross-validation to assess model stability
     print("\nPerforming 5-fold cross-validation...")
     cv_scores = cross_val_score(model, X_train, y_train, 
                                 cv=5, scoring='r2', n_jobs=-1)
@@ -320,59 +169,26 @@ def train_random_forest_model(X_train, y_train):
     return model
 
 
-# ============================================================================
-# STEP 6: MODEL EVALUATION
-# ============================================================================
-
 def evaluate_model(model, X_train, X_test, y_train, y_test, feature_names):
-    """
-    Comprehensive model evaluation with multiple metrics.
-    
-    Parameters:
-    -----------
-    model : trained model
-        The trained Random Forest model
-    X_train, X_test : np.ndarray
-        Scaled feature sets
-    y_train, y_test : pd.Series
-        Target values
-    feature_names : list
-        Names of features for importance ranking
-        
-    Returns:
-    --------
-    tuple : (y_pred_train, y_pred_test, metrics_dict)
-    """
     print("\n" + "="*70)
     print("MODEL EVALUATION")
     print("="*70)
     
-    # Generate predictions
     y_pred_train = model.predict(X_train)
     y_pred_test = model.predict(X_test)
     
-    # Calculate regression metrics
-    # 1. Mean Squared Error (MSE): Average of squared differences
-    #    Lower is better; sensitive to outliers
     mse_train = mean_squared_error(y_train, y_pred_train)
     mse_test = mean_squared_error(y_test, y_pred_test)
     
-    # 2. Root Mean Squared Error (RMSE): Square root of MSE
-    #    Same units as target variable
     rmse_train = np.sqrt(mse_train)
     rmse_test = np.sqrt(mse_test)
     
-    # 3. Mean Absolute Error (MAE): Average of absolute differences
-    #    More robust to outliers than MSE
     mae_train = mean_absolute_error(y_train, y_pred_train)
     mae_test = mean_absolute_error(y_test, y_pred_test)
     
-    # 4. R² Score (Coefficient of Determination)
-    #    Proportion of variance explained by model; 1.0 is perfect
     r2_train = r2_score(y_train, y_pred_train)
     r2_test = r2_score(y_test, y_pred_test)
     
-    # Print results
     print("\nTRAINING SET PERFORMANCE:")
     print(f"  R² Score:  {r2_train:.4f}")
     print(f"  RMSE:      {rmse_train:.4f} kWh")
@@ -385,7 +201,6 @@ def evaluate_model(model, X_train, X_test, y_train, y_test, feature_names):
     print(f"  MAE:       {mae_test:.4f} kWh")
     print(f"  MSE:       {mse_test:.4f}")
     
-    # Assess overfitting
     r2_diff = r2_train - r2_test
     print(f"\nOverfitting Assessment:")
     print(f"  R² difference (train - test): {r2_diff:.4f}")
@@ -396,7 +211,6 @@ def evaluate_model(model, X_train, X_test, y_train, y_test, feature_names):
     else:
         print("  ✗ Significant overfitting - consider regularization")
     
-    # Feature importance analysis
     print("\nFEATURE IMPORTANCE (Top 10):")
     importances = model.feature_importances_
     indices = np.argsort(importances)[::-1]
@@ -404,8 +218,6 @@ def evaluate_model(model, X_train, X_test, y_train, y_test, feature_names):
     for i in range(min(10, len(feature_names))):
         idx = indices[i]
         print(f"  {i+1}. {feature_names[idx]}: {importances[idx]:.4f}")
-    
-    # Store metrics
     metrics = {
         'r2_train': r2_train,
         'r2_test': r2_test,
@@ -420,39 +232,17 @@ def evaluate_model(model, X_train, X_test, y_train, y_test, feature_names):
     return y_pred_train, y_pred_test, metrics
 
 
-# ============================================================================
-# STEP 7: VISUALIZATION
-# ============================================================================
-
 def plot_results(y_train, y_test, y_pred_train, y_pred_test, metrics):
-    """
-    Create comprehensive visualization of model performance.
-    
-    Parameters:
-    -----------
-    y_train, y_test : pd.Series
-        Actual target values
-    y_pred_train, y_pred_test : np.ndarray
-        Predicted values
-    metrics : dict
-        Evaluation metrics
-    """
     print("\n" + "="*70)
     print("GENERATING VISUALIZATIONS")
     print("="*70)
     
-    # Set style
     sns.set_style("whitegrid")
     plt.rcParams['figure.figsize'] = (16, 10)
     
-    # Create subplot layout
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     fig.suptitle('Mars Solar Panel Output Prediction - Model Performance Analysis', 
                  fontsize=16, fontweight='bold', y=0.995)
-    
-    # -------------------------------------------------------------------------
-    # Plot 1: Predicted vs Actual (Training Set)
-    # -------------------------------------------------------------------------
     ax1 = axes[0, 0]
     ax1.scatter(y_train, y_pred_train, alpha=0.5, s=20, color='blue', edgecolors='k', linewidth=0.5)
     ax1.plot([y_train.min(), y_train.max()], [y_train.min(), y_train.max()], 
@@ -538,7 +328,6 @@ def plot_results(y_train, y_test, y_pred_train, y_pred_test, metrics):
     ax6.legend()
     ax6.grid(True, alpha=0.3, axis='y')
     
-    # Add value labels on bars
     for bars in [bars1, bars2]:
         for bar in bars:
             height = bar.get_height()
@@ -547,7 +336,6 @@ def plot_results(y_train, y_test, y_pred_train, y_pred_test, metrics):
     
     plt.tight_layout()
     
-    # Save plot
     output_path = 'mars_solar_prediction_results.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"✓ Visualization saved: {output_path}")
@@ -555,40 +343,18 @@ def plot_results(y_train, y_test, y_pred_train, y_pred_test, metrics):
     plt.show()
 
 
-# ============================================================================
-# STEP 8: MODEL PERSISTENCE
-# ============================================================================
-
 def save_model_artifacts(model, scaler, feature_names, metrics):
-    """
-    Save trained model and associated artifacts for future use.
-    
-    Parameters:
-    -----------
-    model : trained model
-        The trained Random Forest model
-    scaler : StandardScaler
-        Fitted scaler for feature transformation
-    feature_names : list
-        Names of features
-    metrics : dict
-        Model performance metrics
-    """
     print("\n" + "="*70)
     print("SAVING MODEL ARTIFACTS")
     print("="*70)
     
-    # Save the trained model
     model_path = 'mars_solar_model.joblib'
     joblib.dump(model, model_path)
     print(f"✓ Model saved: {model_path}")
     
-    # Save the scaler
     scaler_path = 'mars_solar_scaler.joblib'
     joblib.dump(scaler, scaler_path)
     print(f"✓ Scaler saved: {scaler_path}")
-    
-    # Save feature names and metadata
     metadata = {
         'feature_names': feature_names,
         'metrics': metrics,
@@ -605,54 +371,19 @@ def save_model_artifacts(model, scaler, feature_names, metrics):
     print("  scaler = joblib.load('mars_solar_scaler.joblib')")
 
 
-# ============================================================================
-# STEP 9: PREDICTION FUNCTION FOR NEW DATA
-# ============================================================================
-
 def predict_solar_output(model, scaler, feature_names, new_data):
-    """
-    Make predictions on new Martian solar data.
-    
-    Parameters:
-    -----------
-    model : trained model
-        Loaded model
-    scaler : StandardScaler
-        Loaded scaler
-    feature_names : list
-        Expected feature names
-    new_data : pd.DataFrame
-        New input data with same features
-        
-    Returns:
-    --------
-    np.ndarray : Predicted solar output values
-    """
-    # Ensure features match training data
     if not all(feat in new_data.columns for feat in feature_names):
         missing = [f for f in feature_names if f not in new_data.columns]
         raise ValueError(f"Missing features: {missing}")
     
-    # Select and order features
     X_new = new_data[feature_names]
-    
-    # Scale features
     X_new_scaled = scaler.transform(X_new)
-    
-    # Generate predictions
     predictions = model.predict(X_new_scaled)
     
     return predictions
 
 
-# ============================================================================
-# MAIN EXECUTION PIPELINE
-# ============================================================================
-
 def main():
-    """
-    Main execution function orchestrating the entire ML pipeline.
-    """
     print("\n" + "="*70)
     print("MARS COLONY SOLAR PANEL OUTPUT PREDICTION SYSTEM")
     print("="*70)
@@ -660,35 +391,16 @@ def main():
     print("Model: Random Forest Regression")
     print("="*70)
     
-    # Step 1: Generate data
     data = generate_mars_solar_data(n_samples=1000)
-    
-    # Step 2: Preprocess
     data = preprocess_data(data)
-    
-    # Step 3: Feature engineering
     data = engineer_features(data)
-    
-    # Step 4: Prepare train/test data
     X_train, X_test, y_train, y_test, scaler, feature_names = prepare_train_test_data(data)
-    
-    # Step 5: Train model
     model = train_random_forest_model(X_train, y_train)
-    
-    # Step 6: Evaluate model
     y_pred_train, y_pred_test, metrics = evaluate_model(
         model, X_train, X_test, y_train, y_test, feature_names
     )
-    
-    # Step 7: Visualize results
     plot_results(y_train, y_test, y_pred_train, y_pred_test, metrics)
-    
-    # Step 8: Save model
     save_model_artifacts(model, scaler, feature_names, metrics)
-    
-    # ========================================================================
-    # DEMONSTRATION: Making predictions with saved model
-    # ========================================================================
     print("\n" + "="*70)
     print("DEMONSTRATION: LOADING MODEL AND MAKING PREDICTIONS")
     print("="*70)
@@ -744,10 +456,6 @@ def main():
     print("  4. mars_solar_prediction_results.png (visualizations)")
     print("\nReady for deployment in Mars colony operations!")
 
-
-# ============================================================================
-# EXECUTE PIPELINE
-# ============================================================================
 
 if __name__ == "__main__":
     main()
